@@ -1,8 +1,10 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <WebServer.h>
 #include <time.h>
 #include <ArduinoOTA.h>
+#include <Preferences.h>
 #include "credentials.h"
 
 const byte LEpin=12; //pin Latch Enabled data accepted while HI level
@@ -28,10 +30,44 @@ const char* ntpServer = "pool.ntp.org";
 unsigned long lastNtpSync = 0;
 const unsigned long ntpInterval = 3600 * 1000; // 1 hour
 
+WebServer server(80);
+Preferences preferences;
+
+void handleRoot() {
+  server.send(200, "text/plain", "Nixie clock is running");
+}
+
+void handleBrightness() {
+  if (!server.hasArg("value")) {
+    server.send(400, "text/plain", "Missing 'value' parameter");
+    return;
+  }
+  int newBrightness = server.arg("value").toInt();
+
+  if (newBrightness > duty_cycle) newBrightness = duty_cycle;
+  if (newBrightness < 0) newBrightness = 0;
+
+  brightness = newBrightness;
+
+  preferences.begin("settings", false);
+  preferences.putInt("brightness", brightness);
+  preferences.end();
+
+  // brightness = constrain(brightness, 0, 100);
+  // setBrightness(brightness);
+
+  String response = "Brightness set to " + String(brightness);
+  server.send(200, "text/plain", response);
+}
+
 void setup()
 {
   Serial.begin(115200);
   Serial.println(F("Starting"));
+
+  preferences.begin("settings", false);
+  brightness = preferences.getInt("brightness", 5);
+  preferences.end();
 
   pinMode(LEpin, OUTPUT);
 
@@ -80,6 +116,12 @@ void setup()
 
   ArduinoOTA.begin();
   Serial.println("OTA ready");
+
+  server.on("/", handleRoot);
+  server.on("/brightness", handleBrightness);
+  server.begin();
+  Serial.println("HTTP server started");
+
 }
 
 unsigned long lastUpdate = millis();
@@ -87,6 +129,7 @@ unsigned long dotUpdate = millis();
 
 void loop() {
   ArduinoOTA.handle();
+  server.handleClient();
 
   if (millis() - lastNtpSync > ntpInterval) {
     syncTimeFromNTP();
